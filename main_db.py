@@ -93,8 +93,8 @@ class DatabaseConnector(object):
 
     def delete_table(self):
         self.logger.info('Dropping table')
-        if self.engine.has_table(table_name=self.table):
-            query = 'DROP TABLE {:s};'.format(self.table)
+        if self.engine.has_table(table_name=self.table, schema=self.schema):
+            query = f'DROP TABLE {self.table_full}'
             self.engine.execute(query)
         self.logger.info('Dropping table finished')
 
@@ -173,6 +173,7 @@ class DatabaseConnector(object):
                 df_batch = self.df.iloc[index, :]
                 df_batch.to_sql(name=self.table,
                                 con=self.engine,
+                                schema=self.schema,
                                 if_exists=self.if_exists,
                                 index=True,
                                 chunksize=chunksize)
@@ -193,7 +194,7 @@ class DatabaseConnector(object):
         return runtime
 
     def get_max_db_id(self):
-        query = 'SELECT MAX(DB_ID) AS MAX_DB_ID FROM {:s}'.format(self.table)
+        query = 'SELECT MAX(DB_ID) AS MAX_DB_ID FROM {:s}'.format(self.table_full)
         df = pd.read_sql(query, con=self.engine, index_col=None)
         max_db_id = 0 if df.loc[0, 'MAX_DB_ID'] is None else df.iloc[0, 0]
         return max_db_id
