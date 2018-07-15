@@ -7,6 +7,7 @@ from numpy.random import choice
 from numpy.random import seed
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.types import Integer, Float, String
 
 from custom_logger import CustomLogger
 from configparser import ConfigParser
@@ -50,6 +51,7 @@ class DatabaseConnector(object):
         self.engine = None
         self.conn = None
         self.seed = seed(1234)
+        self.dtype = None
 
     def open_db(self, SET_FAST_EXECUTEMANY_SWITCH=True):
         # create an engine and a connection
@@ -101,11 +103,14 @@ class DatabaseConnector(object):
     def create_column_names(self):
         self.column_names = []
         self.column_names.append(['DB_ID', 'int'])
+        self.dtype = {'DB_ID': Integer()}
         for m in range(1, self.number_of_float_columns + 1):
             self.column_names.append(['float{:d}'.format(m), 'float'])
+            self.dtype[f'float{m}'] = Float()
 
         for m in range(1, self.number_of_string_columns + 1):
             self.column_names.append(['string{:d}'.format(m), 'nvarchar(max)'])
+            self.dtype[f'string{m}'] = String(255)
 
     def make_table(self):
         self.logger.info('Creating table')
@@ -123,11 +128,11 @@ class DatabaseConnector(object):
 
         self.logger.info('Creating table finished')
 
-    def create_random_data(self, max_db_id=None):
+    def create_random_data(self):
         self.logger.info('Creating random data')
 
-        if max_db_id is None:
-            max_db_id = self.get_max_db_id() if self.use_primary_key is True else 0
+        if self.if_exists == 'append':
+            max_db_id = self.get_max_db_id()
         else:
             max_db_id = 0
         data_index = np.arange(1 + max_db_id, self.number_of_rows + 1 + max_db_id,
@@ -176,7 +181,8 @@ class DatabaseConnector(object):
                                 schema=self.schema,
                                 if_exists=self.if_exists,
                                 index=True,
-                                chunksize=chunksize)
+                                chunksize=chunksize,
+                                dtype=self.dtype)
                 format_string = '    Batch {:d}/{:d}, size {:d}/{:d}: {:s}'
                 self.logger.info(format_string.format(i + 1,
                                                       number_of_batches,
@@ -187,11 +193,11 @@ class DatabaseConnector(object):
                                  )
         except IntegrityError:
             self.logger.error('Primary key constraint')
-        runtime = datetime.now() - start_time
+        run_time = datetime.now() - start_time
         self.logger.info('Total runtime: {:s}'.format(str(runtime).split('.')[0]))
 
         self.logger.info('Inserting data finished')
-        return runtime
+        return run_time
 
     def get_max_db_id(self):
         query = 'SELECT MAX(DB_ID) AS MAX_DB_ID FROM {:s}'.format(self.table_full)
@@ -218,9 +224,9 @@ class DatabaseConnector(object):
         self.create_random_data()
         if self.export_data is True:
             self.export_random_data()
-        runtime = self.insert_data()
+        run_time = self.insert_data()
         self.close_db()
-        return runtime
+        return run_time
 
 
 def performance():
@@ -230,9 +236,9 @@ def performance():
     df = pd.DataFrame(columns=['batch_size', 'time'])
     for i, batch_size in enumerate(batch_sizes):
         db = DatabaseConnector(logger=my_logger, batch_size=batch_size, config_file=my_config_file)
-        runtime = db.run()
+        run_time = db.run()
         df.loc[i, 'batch_size'] = db.batch_size
-        df.loc[i, 'time'] = str(runtime).split('.')[0]
+        df.loc[i, 'time'] = str(run_time).split('.')[0]
     print(df)
 
 
