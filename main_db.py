@@ -194,7 +194,7 @@ class DatabaseConnector(object):
         except IntegrityError:
             self.logger.error('Primary key constraint')
         run_time = datetime.now() - start_time
-        self.logger.info('Total runtime: {:s}'.format(str(runtime).split('.')[0]))
+        self.logger.info('Total runtime: {:s}'.format(str(run_time).split('.')[0]))
 
         self.logger.info('Inserting data finished')
         return run_time
