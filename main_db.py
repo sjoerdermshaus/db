@@ -116,7 +116,7 @@ class DatabaseConnector(object):
 
         self.logger.info('Creating table finished')
 
-    def determine_dtype(self):
+    def determine_dtype_and_column_names(self):
         self.logger.info('Determining dtype')
         self.df = pd.read_csv(self.csv, sep=',', nrows=10)
         self.column_names = self.df.columns
@@ -202,8 +202,8 @@ class DatabaseConnector(object):
         return pd.read_sql(query, con=self.engine, index_col=['DB_ID'])
 
     def run(self):
-        self.determine_dtype()
         self.open_db()
+        self.determine_dtype_and_column_names()
         if 'sqlalchemy' in self.interface:
             run_time = self.df_to_sql()
         else:
