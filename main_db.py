@@ -116,7 +116,7 @@ class DatabaseConnector(object):
 
         self.logger.info('Creating table finished')
 
-    def determine_dtype_and_column_names(self):
+    def set_dtype_and_column_names(self):
         self.logger.info('Determining dtype')
         self.df = pd.read_csv(self.csv, sep=',', nrows=10)
         self.column_names = self.df.columns
@@ -203,7 +203,7 @@ class DatabaseConnector(object):
 
     def run(self):
         self.open_db()
-        self.determine_dtype_and_column_names()
+        self.set_dtype_and_column_names()
         if 'sqlalchemy' in self.interface:
             run_time = self.df_to_sql()
         else:
@@ -216,7 +216,7 @@ class DatabaseConnector(object):
 def performance():
     kwargs = {'logger': CustomLogger('main_db_logging.yaml').logger,
               'config_file': 'main_db_settings.ini',
-              'csv': 'random_data_100K.csv',
+              'csv': 'random_data_1M.csv',
               'interface': 'pyodbc:sqlalchemy',
               'chunksize': 100000}
 
@@ -236,8 +236,10 @@ def performance():
             df.loc[i, 'interface'] = interface
             df.loc[i, 'chunksize'] = chunksize
             df.loc[i, 'run_time'] = str(run_time).split('.')[0]
+
+    df.sort_values(by=['run_time'], ascending=True, inplace=True)
+    df.to_excel(f"performance_{kwargs['csv'].split('.')[0]}.xlsx", index=False)
     print(df)
-    df.to_excel('performance.xlsx', index=False)
 
 
 def main():
