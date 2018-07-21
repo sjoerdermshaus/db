@@ -8,11 +8,14 @@ from numpy.random import seed
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.types import Integer, Float, String
+import pyodbc
+import turbodbc
 
 from custom_logger import CustomLogger
 from configparser import ConfigParser
 
 from profiler import profiler, runtime
+from multiprocessing import Pool
 
 
 class DatabaseConnector(object):
@@ -33,8 +36,10 @@ class DatabaseConnector(object):
         self.table_full = '[{:s}].[{:s}].[{:s}]'.format(self.dbname, self.schema, self.table)
 
         # [run]
+        self.interface = self.config['run']['interface']
         self.drop_table = self.config['run'].getboolean('drop_table')
         self.create_table = self.drop_table
+        self.bool_create_random_data = self.config['run'].getboolean('create_random_data')
         self.export_data = self.config['run'].getboolean('export_data')
         self.use_primary_key = self.config['run'].getboolean('use_primary_key')
         self.if_exists = self.config['run']['if_exists']
@@ -48,27 +53,62 @@ class DatabaseConnector(object):
         self.df = pd.DataFrame()
         self.batch_size = min(batch_size, self.number_of_rows)
         self.logger = logger
-        self.engine = None
         self.conn = None
         self.seed = seed(1234)
-        self.dtype = None
+        self.dtype = dict()
 
-    def open_db(self, SET_FAST_EXECUTEMANY_SWITCH=True):
+    def open_db(self, interface='sqlalchemy', SET_FAST_EXECUTEMANY_SWITCH=True):
         # create an engine and a connection
         self.logger.info('Establishing connection')
-        engine_string = '{:s}+{:s}://{:s}'.format(self.db,
-                                                  self.driver,
-                                                  self.dsn)
-        self.engine = create_engine(engine_string)
 
-        if SET_FAST_EXECUTEMANY_SWITCH:
-            @event.listens_for(self.engine, 'before_cursor_execute')
-            def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
-                if executemany:
-                    cursor.fast_executemany = True
+        if self.interface == 'sqlalchemy':
+            engine_string = '{:s}+{:s}://{:s}'.format(self.db,
+                                                      'pyodbc',
+                                                      self.dsn)
+            self.engine = create_engine(engine_string)
+            self.conn = self.engine.raw_connection()
 
-        self.conn = self.engine.connect()
+            if SET_FAST_EXECUTEMANY_SWITCH:
+                @event.listens_for(self.engine, 'before_cursor_execute')
+                def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
+                    if executemany:
+                        cursor.fast_executemany = True
+
+        elif self.interface == 'pyodbc':
+            connection_string = f'DSN={self.dsn}'
+            self.conn = pyodbc.connect(connection_string, autocommit=True)
+
+        elif self.interface == 'turbodbc':
+            engine_string = '{:s}+{:s}://{:s}'.format(self.db,
+                                                      'turbodbc',
+                                                      self.dsn)
+            self.engine = create_engine(engine_string)
+            self.conn = self.engine.raw_connection()
+
+            #if SET_FAST_EXECUTEMANY_SWITCH:
+            #    @event.listens_for(self.engine, 'before_cursor_execute')
+            #    def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
+            #        if executemany:
+            #            cursor.fast_executemany = True
+            #options = turbodbc.make_options(autocommit=True)
+            #self.conn = turbodbc.connect(dsn=self.dsn, turbodbc_options=options)
+
         self.logger.info('Establishing connection finished')
+
+    @staticmethod
+    def open_db_static():
+        # create an engine and a connection
+        engine_string = '{:s}+{:s}://{:s}'.format('mssql',
+                                                  'pyodbc',
+                                                  'main_db')
+        engine = create_engine(engine_string)
+
+        @event.listens_for(engine, 'before_cursor_execute')
+        def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
+            if executemany:
+                cursor.fast_executemany = True
+        return engine
+
 
     def open_db_pymsql(self):
         self.db = 'mssql'
@@ -95,9 +135,10 @@ class DatabaseConnector(object):
 
     def delete_table(self):
         self.logger.info('Dropping table')
-        if self.engine.has_table(table_name=self.table, schema=self.schema):
-            query = f'DROP TABLE {self.table_full}'
-            self.engine.execute(query)
+        cursor = self.conn.cursor()
+        # if cursor.tables(table=self.table, schema=self.schema).fetchone():
+        query = f"DROP TABLE {self.table_full}"
+        cursor.execute(query)
         self.logger.info('Dropping table finished')
 
     def create_column_names(self):
@@ -120,11 +161,18 @@ class DatabaseConnector(object):
         else:
             query = 'CREATE TABLE {:s} (DB_ID int\n'.format(self.table_full)
 
-        for col in self.column_names[1:]:
-            query = '{:s},\n{:s} {:s}'.format(query, col[0], col[1])
+        for i, col in enumerate(self.df.columns[1:]):
+            dtype = None
+            if self.df[col].dtype == np.float64:
+                dtype = 'float'
+            elif self.df[col].dtype == np.object:
+                dtype = 'nvarchar(max)'
+            query = '{:s},\n{:s} {:s}'.format(query, col, dtype)
 
         query = '{:s}\n);'.format(query)
-        self.conn.execute(query)
+        cursor = self.conn.cursor()
+        cursor.execute(query)
+        #self.conn.execute(query)
 
         self.logger.info('Creating table finished')
 
@@ -159,6 +207,24 @@ class DatabaseConnector(object):
         self.df.to_csv(self.csv, sep=',', index=True)
         self.logger.info('Exporting random data finished')
 
+    def load_random_data(self, nrows=100000):
+        self.logger.info('Loading random data')
+        if nrows is None:
+            self.df = pd.read_csv(self.csv, sep=',')
+        else:
+            self.df = pd.read_csv(self.csv, sep=',', nrows=nrows)
+
+        self.dtype = dict()
+        for col in self.df.columns:
+            if self.df[col].dtype == np.float64:
+                self.dtype[col] = Float()
+            elif self.df[col].dtype == np.object:
+                self.dtype[col] = String(255)
+            elif self.df[col].dtype == np.int64:
+                self.dtype[col] = Integer()
+
+        self.logger.info('Loading random data finished')
+
     @staticmethod
     def create_random_string(size=20, number_of_rows=10):
         full_string = ''.join(choice(list(string.ascii_lowercase), size=size * number_of_rows, replace=True))
@@ -168,8 +234,8 @@ class DatabaseConnector(object):
     def insert_data(self):
         self.logger.info('Inserting data')
 
-        chunksize = self.batch_size
-        number_of_batches = int(self.number_of_rows / self.batch_size)
+        self.batch_size = min(self.batch_size, len(self.df))
+        number_of_batches = int(len(self.df) / self.batch_size)
         start_time = datetime.now()
         try:
             for i in range(number_of_batches):
@@ -180,8 +246,7 @@ class DatabaseConnector(object):
                                 con=self.engine,
                                 schema=self.schema,
                                 if_exists=self.if_exists,
-                                index=True,
-                                chunksize=chunksize,
+                                index=False,
                                 dtype=self.dtype)
                 format_string = '    Batch {:d}/{:d}, size {:d}/{:d}: {:s}'
                 self.logger.info(format_string.format(i + 1,
@@ -215,18 +280,105 @@ class DatabaseConnector(object):
         self.logger.info('Closing connection finished')
 
     def run(self):
+        self.interface = 'sqlalchemy'
         self.open_db()
         if self.drop_table is True:
             self.delete_table()
-        self.create_column_names()
+        # self.create_column_names()
         if self.create_table is True:
             self.make_table()
-        self.create_random_data()
-        if self.export_data is True:
-            self.export_random_data()
+        if self.bool_create_random_data:
+            self.create_random_data()
+            if self.export_data is True:
+                self.export_random_data()
+        else:
+            self.load_random_data()
         run_time = self.insert_data()
         self.close_db()
         return run_time
+
+    def run_pyodbc(self):
+        self.interface = 'pyodbc'
+        self.open_db()
+
+        self.load_random_data()
+
+        self.delete_table()
+        self.make_table()
+        str_cols = ','.join([f'{col}' for col in self.df.columns])
+        question_marks = ','.join(f"{'? ' * len(self.df.columns)}".split())
+        query = f"""INSERT INTO {self.table_full} 
+                    ({str_cols}) VALUES ({question_marks})"""
+
+        cursor = self.conn.cursor()
+        cursor.fast_executemany = True
+        self.logger.info('Inserting data pyodbc')
+        start_time = datetime.now()
+        cursor.executemany(query, [tuple(l) for l in self.df.values])
+        run_time = datetime.now() - start_time
+        self.logger.info('Total runtime: {:s}'.format(str(run_time).split('.')[0]))
+        cursor.close()
+        self.conn.close()
+
+    def run_turbodbc(self):
+        self.interface = 'turbodbc'
+        self.open_db()
+
+        self.load_random_data()
+
+        #self.delete_table()
+        #self.make_table()
+        self.insert_data()
+        self.close_db()
+
+        # str_cols = ','.join([f'{col}' for col in self.df.columns])
+        # question_marks = ','.join(f"{'? ' * len(self.df.columns)}".split())
+        # query = f"""INSERT INTO {self.table_full}
+        #             ({str_cols}) VALUES ({question_marks})"""
+        #
+        # cursor = self.conn.cursor()
+        # cursor.fast_executemany = True
+        # self.logger.info('Inserting data turbodbc')
+        # start_time = datetime.now()
+        # cursor.executemany(query, self.df.values.tolist())
+        # run_time = datetime.now() - start_time
+        # self.logger.info('Total runtime: {:s}'.format(str(run_time).split('.')[0]))
+        # cursor.close()
+        # self.conn.close()
+
+
+    @staticmethod
+    def insert_data2(df, name, engine, schema, if_exists):
+        print(name, len(df))
+        engine = DatabaseConnector.open_db_static()
+        df.to_sql(name=name,
+                  con=engine,
+                  schema=schema,
+                  if_exists=if_exists,
+                  index=True)
+
+    def run2(self):
+        #self.open_db()
+        chunksize = 1000000
+        processes = 5
+        mp_chunksize = int(chunksize / processes)
+        for i, df_chunk in enumerate(pd.read_csv(self.csv, sep=',', chunksize=chunksize)):
+            print(i, len(df_chunk))
+            x = [(df_chunk.iloc[j * mp_chunksize:(j + 1) * mp_chunksize, :],
+                  f'{self.table}_chunk{i+1}_multi{j+1}',
+                  None,
+                  self.schema,
+                  'replace') for j in range(processes)]
+            #self.insert_data2(*x[0])
+            start_time = datetime.now()
+            p = Pool(processes=processes)
+            for j in range(processes):
+                p.apply(self.insert_data2, args=x[j])
+            p.close()
+            p.join()
+            run_time = datetime.now() - start_time
+            self.logger.info('Total runtime: {:s}'.format(str(run_time).split('.')[0]))
+        #self.close_db()
 
 
 def performance():
@@ -249,15 +401,18 @@ def main():
     my_logger = CustomLogger('main_db_logging.yaml').logger
     my_config_file = 'main_db_settings.ini'
     my_db = DatabaseConnector(logger=my_logger, config_file=my_config_file)
+    my_db.run_turbodbc()
+    #my_db.run_pyodbc()
     my_db.run()
-    if my_db.number_of_rows <= 10:
-        my_db.open_db()
-        print('-' * 100)
-        print(my_db.get_max_db_id())
-        print('-' * 100)
-        print(my_db.get_data())
-        print('-' * 100)
-        my_db.close_db()
+    #my_db.run2()
+    # if my_db.number_of_rows <= 10:
+    #     my_db.open_db()
+    #     print('-' * 100)
+    #     print(my_db.get_max_db_id())
+    #     print('-' * 100)
+    #     print(my_db.get_data())
+    #     print('-' * 100)
+    #     my_db.close_db()
 
 
 if __name__ == '__main__':
