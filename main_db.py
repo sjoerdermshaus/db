@@ -220,8 +220,8 @@ def performance():
               'interface': 'pyodbc:sqlalchemy',
               'chunksize': 100000}
 
-    interfaces = ['pyodbc', 'pyodbc:sqlalchemy', 'turbodbc', 'turbodbc:sqlalchemy']
-    chunksizes = [50000, 100000, 250000]
+    interfaces = ['pyodbc:sqlalchemy', 'turbodbc', 'turbodbc:sqlalchemy']
+    chunksizes = [75000, 100000, 125000, 150000, 175000, 200000]
 
     df = pd.DataFrame(columns=['interface', 'chunksize', 'run_time'])
 
