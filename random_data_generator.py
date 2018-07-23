@@ -80,10 +80,10 @@ class RandomDataGenerator(object):
 
 def main():
     my_logger = CustomLogger('random_data_generator.yaml').logger
-    kwargs = {'number_of_rows': 10000,
-              'number_of_float_columns': 20,
-              'number_of_string_columns': 30,
-              'csv': 'random_data_10K.csv',
+    kwargs = {'number_of_rows': 100000,
+              'number_of_float_columns': 130,
+              'number_of_string_columns': 20,
+              'csv': 'random_data_100K.csv',
               'to_excel': False,
               'logger': my_logger}
     RandomDataGenerator(**kwargs).generate()

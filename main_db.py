@@ -11,6 +11,8 @@ import turbodbc
 from custom_logger import CustomLogger
 from configparser import ConfigParser
 
+from multiprocessing import Pool
+
 
 class DatabaseConnector(object):
 
@@ -69,7 +71,8 @@ class DatabaseConnector(object):
 
         elif self.interface == 'turbodbc':
             connection_string = f'dsn={self.dsn}'
-            self.conn = turbodbc.connect(connection_string=connection_string)
+            options = turbodbc.make_options(autocommit=True, parameter_sets_to_buffer=self.chunksize)
+            self.conn = turbodbc.connect(connection_string=connection_string, turbodbc_options=options)
 
         else:
             pass
@@ -156,6 +159,75 @@ class DatabaseConnector(object):
 
         return run_time
 
+    @staticmethod
+    def helper(args):
+        df = args[0]
+        kwargs = args[1]
+        engine_string = f'mssql+pyodbc://main_db_17'
+        engine = create_engine(engine_string)
+        conn = engine.raw_connection()
+
+        @event.listens_for(engine, 'before_cursor_execute')
+        def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
+            if executemany:
+                cursor.fast_executemany = True
+        kwargs['con'] = engine
+
+        chunksize = min(10000, len(df))
+        number_of_chunks = int(len(df) / chunksize)
+        for i in range(number_of_chunks):
+            df_chunk = df.iloc[i * chunksize: (i + 1) * chunksize, :]
+            if i == 0:
+                kwargs['if_exists'] = 'replace'
+            else:
+                kwargs['if_exists'] = 'append'
+            df_chunk.to_sql(**kwargs)
+
+        conn.close()
+
+    def df_to_sql_mp(self):
+
+        self.logger.info('Reading data')
+        self.set_dtype_and_column_names()
+
+        df = pd.read_csv(self.csv)
+
+        processes = 5
+        chunksize = int(len(df) / processes)
+        x = [[df.iloc[i * chunksize:(i + 1) * chunksize, :],
+              {'name': f'{self.table}_chunk{i}',
+               'schema': self.schema,
+               'if_exists': 'replace',
+               'index': False,
+               'dtype': self.dtype}] for i in range(processes)]
+
+        start_time = datetime.now()
+        with Pool(processes=processes) as p:
+            p.map(self.helper, x)
+
+        # for process in range(processes):
+        #     multiprocess.Process()
+
+        #self.helper(x[0])
+
+
+        #
+        # for i, df_chunk in enumerate():
+        #     start_time_chunk = datetime.now()
+        #     if i == 0:
+        #         if_exists = 'replace'
+        #     else:
+        #         if_exists = 'append'
+        #
+        #     run_time = str(datetime.now() - start_time_chunk).split('.')[0]
+        #     self.logger.info(f'    Chunk #{i + 1}, size: {len(df_chunk)}, upload time: {run_time}')
+        #
+        run_time = datetime.now() - start_time
+        self.logger.info('Total runtime: {:s}'.format(str(run_time).split('.')[0]))
+        self.logger.info('Inserting data finished')
+
+        return run_time
+
     def insert_data(self):
 
         self.logger.info('Inserting data')
@@ -165,8 +237,8 @@ class DatabaseConnector(object):
         for i, df_chunk in enumerate(pd.read_csv(self.csv, chunksize=self.chunksize)):
             # Create query
             if i == 0:
-                str_cols = ','.join([f'{col}' for col in df_chunk.columns])
-                question_marks = ','.join(f"{'? ' * len(df_chunk.columns)}".split())
+                str_cols = ','.join(df_chunk.columns)
+                question_marks = ','.join(list('?' * len(df_chunk.columns)))
                 query = f'INSERT INTO {self.table_full} ({str_cols}) VALUES ({question_marks})'
 
             params = None
@@ -198,8 +270,11 @@ class DatabaseConnector(object):
         return run_time
 
     def get_data(self):
-        query = 'SELECT * FROM {:s}'.format(self.table)
-        return pd.read_sql(query, con=self.engine, index_col=['DB_ID'])
+        self.open_db()
+        query = 'SELECT TOP 10 * FROM {:s}'.format(self.table_full)
+        df = pd.read_sql(query, con=self.conn, index_col=['DB_ID'])
+        self.close_db()
+        return df
 
     def run(self):
         self.open_db()
@@ -216,12 +291,12 @@ class DatabaseConnector(object):
 def performance():
     kwargs = {'logger': CustomLogger('main_db_logging.yaml').logger,
               'config_file': 'main_db_settings.ini',
-              'csv': 'random_data_1M.csv',
-              'interface': 'pyodbc:sqlalchemy',
-              'chunksize': 100000}
+              'csv': 'random_data_10K.csv',
+              'interface': None,
+              'chunksize': None}
 
-    interfaces = ['pyodbc:sqlalchemy', 'turbodbc', 'turbodbc:sqlalchemy']
-    chunksizes = [75000, 100000, 125000, 150000, 175000, 200000]
+    interfaces = ['turbodbc', 'turbodbc:sqlalchemy', 'pyodbc:sqlalchemy']
+    chunksizes = [100000]
 
     df = pd.DataFrame(columns=['interface', 'chunksize', 'run_time'])
 
@@ -245,12 +320,14 @@ def performance():
 def main():
     kwargs = {'logger': CustomLogger('main_db_logging.yaml').logger,
               'config_file': 'main_db_settings.ini',
-              'csv': 'random_data_100K.csv',
-              'interface': 'pyodbc:sqlalchemy'}
+              'csv': 'random_data_1M.csv',
+              'interface': 'pyodbc:sqlalchemy',
+              'chunksize': 100000}
     my_db = DatabaseConnector(**kwargs)
+    #my_db.df_to_sql_mp()
     my_db.run()
 
 
 if __name__ == '__main__':
-    # main()
-    performance()
+    main()
+    # performance()
