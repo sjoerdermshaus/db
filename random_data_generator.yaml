@@ -6,7 +6,7 @@ handlers:
         class: logging.FileHandler
         level: INFO
         formatter: simple
-        filename: main_db_logging.log
+        filename: random_data_generator.log
         mode: w
         
     console:
@@ -18,7 +18,7 @@ handlers:
 formatters:
     simple:
         class: logging.Formatter
-        format: '%(asctime)-20s| %(filename)-20s| %(funcName)-20s| %(lineno)-4s| %(levelname)-7s| %(message)s'
+        format: '%(asctime)-20s| %(filename)-30s| %(funcName)-20s| %(lineno)-4s| %(levelname)-7s| %(message)s'
         datefmt: '%Y-%m-%d %H:%M:%S'
 
 root:

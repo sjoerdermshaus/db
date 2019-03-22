@@ -12,6 +12,6 @@ class CustomLogger(object):
     @staticmethod
     def _configure_logger(file):
         with open(file, 'r') as f:
-            config = yaml.load(f.read())
+            config = yaml.load(f.read(), Loader=yaml.FullLoader)
             dictConfig(config)
         return logging.getLogger(__name__)
