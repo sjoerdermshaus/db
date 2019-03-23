@@ -11,7 +11,7 @@ from sqlalchemy.types import Integer, Float, String
 from utils.custom_logger import CustomLogger
 from configparser import ConfigParser
 
-from utils.profiler import profiler, runtime
+from utils.profiler import profiler
 
 from random_data_generator.core import RandomDataGenerator
 
@@ -68,6 +68,7 @@ class DatabaseConnector(object):
         self.logger.info('Establishing connection finished')
 
     def _generate_random_data(self):
+        self.logger.info(f'Generating random data')
         kwargs = {'number_of_rows': self.number_of_rows,
                   'number_of_float_columns': self.number_of_float_columns,
                   'number_of_integer_columns': self.number_of_integer_columns,
@@ -76,6 +77,7 @@ class DatabaseConnector(object):
                   'to_excel': False,
                   'logger': logging.getLogger('random_data_generator')}
         RandomDataGenerator(**kwargs).run()
+        self.logger.info(f'Generating random data finished')
 
     def _load_random_data(self):
         self.logger.info(f'Loading random data from {self.csv}')
