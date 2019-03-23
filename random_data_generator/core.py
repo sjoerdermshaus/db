@@ -10,9 +10,17 @@ from utils.custom_logger import CustomLogger
 
 class RandomDataGenerator(object):
 
-    def __init__(self, number_of_rows, number_of_float_columns, number_of_string_columns, csv, to_excel, logger):
+    def __init__(self,
+                 number_of_rows,
+                 number_of_float_columns,
+                 number_of_integer_columns,
+                 number_of_string_columns,
+                 csv,
+                 to_excel,
+                 logger):
         self.number_of_rows = number_of_rows
         self.number_of_float_columns = number_of_float_columns
+        self.number_of_integer_columns = number_of_integer_columns
         self.number_of_string_columns = number_of_string_columns
         self.csv = csv
         self.to_excel = to_excel
@@ -29,6 +37,10 @@ class RandomDataGenerator(object):
         for m in range(1, self.number_of_float_columns + 1):
             self.column_names.append(['float{:d}'.format(m), 'float'])
             self.dtype[f'float{m}'] = Float()
+
+        for m in range(1, self.number_of_integer_columns + 1):
+            self.column_names.append(['integer{:d}'.format(m), 'integer'])
+            self.dtype[f'integer{m}'] = Integer()
 
         for m in range(1, self.number_of_string_columns + 1):
             self.column_names.append(['string{:d}'.format(m), 'nvarchar(max)'])
@@ -52,6 +64,14 @@ class RandomDataGenerator(object):
         columns_float = [col[0] for col in self.column_names if col[1] == 'float']
         df_float = pd.DataFrame(data=data_float, columns=columns_float)
 
+        self.logger.info('Creating integer data')
+        data_integer = np.random.randint(low=0,
+                                         high=100,
+                                         size=(self.number_of_rows, self.number_of_integer_columns),
+                                         dtype=np.int64)
+        columns_integer = [col[0] for col in self.column_names if col[1] == 'integer']
+        df_integer = pd.DataFrame(data=data_integer, columns=columns_integer)
+
         self.logger.info('Creating string data')
         columns_string = [col[0] for col in self.column_names if col[1] == 'nvarchar(max)']
         df_string = pd.DataFrame(columns=columns_string)
@@ -59,7 +79,7 @@ class RandomDataGenerator(object):
             df_string[col] = self.create_random_string(number_of_rows=self.number_of_rows)
 
         self.logger.info('Concatenating DataFrames')
-        frames = [df_index, df_float, df_string]
+        frames = [df_index, df_float, df_integer, df_string]
         self.df = pd.concat(frames, axis=1)
         self.df.set_index(columns_index, inplace=True)
 
@@ -72,7 +92,7 @@ class RandomDataGenerator(object):
             self.df.to_excel(f"{self.csv.split('.')[0]}.xlsx", index=True)
         self.logger.info('Exporting random data finished')
 
-    def generate(self):
+    def run(self):
         self.create_column_names()
         self.create_random_data()
         self.export_random_data()
@@ -85,7 +105,7 @@ def main():
               'csv': 'random_data_2K.csv',
               'to_excel': False,
               'logger': CustomLogger('random_data_generator.yaml').logger}
-    RandomDataGenerator(**kwargs).generate()
+    RandomDataGenerator(**kwargs).run()
 
 
 if __name__ == '__main__':

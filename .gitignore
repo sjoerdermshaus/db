@@ -1,0 +1,5 @@
+#files
+*.gitignore
+*.log
+*.csv
+*.prof

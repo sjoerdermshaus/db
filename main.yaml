@@ -6,7 +6,7 @@ handlers:
         class: logging.FileHandler
         level: INFO
         formatter: simple
-        filename: random_data_generator.log
+        filename: main.log
         mode: w
         
     console:
@@ -14,6 +14,13 @@ handlers:
         level: INFO
         formatter: simple
         stream: ext://sys.stdout
+
+    random_data_generator_file:
+        class: logging.FileHandler
+        level: INFO
+        formatter: simple
+        filename: random_data_generator.log
+        mode: w
 
 formatters:
     simple:
@@ -24,3 +31,9 @@ formatters:
 root:
     level: NOTSET
     handlers: [file, console]
+
+loggers:
+    random_data_generator:
+        level: NOTSET
+        handlers: [random_data_generator_file, console]
+        propagate: false
